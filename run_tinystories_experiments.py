@@ -8,15 +8,16 @@ DEFAULT_CONFIG = {
     "tokenizer_fallback_id": "EleutherAI/gpt-neo-125M",
     "dataset_id": "roneneldan/TinyStories",
     "output_root": "./finetune_runs_Tim",
-    "fractions": [0.1, 0.7],
+    "fractions": [0.5, 1],
     "special_samples_target": 10000,
     # Number of times to cycle through the switched/special set per run.
-    "special_sample_passes": 5,
+    "special_sample_passes": 20,
     "val_samples_per_run": 100,
     "train_batch_size": 8,
     "eval_batch_size": 8,
     "grad_accum_steps": 2,
     "learning_rate": 1e-4,
+    "use_lr_decay": False,
     "weight_decay": 0.1,
     "warmup_steps": 50,
     # None = dynamic steps per fraction (old behavior):
@@ -51,6 +52,9 @@ def parse_args():
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--special-samples-target", type=int, default=None)
     parser.add_argument("--special-sample-passes", type=int, default=None)
+    parser.add_argument("--val-samples-per-run", type=int, default=None)
+    parser.add_argument("--switched-eval-samples", type=int, default=None)
+    parser.add_argument("--no-lr-decay", action="store_true", help="Use constant LR schedule (no decay).")
     parser.add_argument("--eval-steps", type=int, default=None)
     parser.add_argument("--output-root", type=str, default=None)
     parser.add_argument("--skip-fraction-training", action="store_true")
@@ -74,6 +78,12 @@ def build_config_from_defaults_and_args(args) -> RunConfig:
         cfg["special_samples_target"] = args.special_samples_target
     if args.special_sample_passes is not None:
         cfg["special_sample_passes"] = args.special_sample_passes
+    if args.val_samples_per_run is not None:
+        cfg["val_samples_per_run"] = args.val_samples_per_run
+    if args.switched_eval_samples is not None:
+        cfg["switched_eval_samples"] = args.switched_eval_samples
+    if args.no_lr_decay:
+        cfg["use_lr_decay"] = False
     if args.eval_steps is not None:
         cfg["eval_steps"] = args.eval_steps
     if args.output_root is not None:

@@ -55,8 +55,14 @@ NON_NAME_CAPITALIZED_WORDS = {
     "Into", "It", "Its", "My", "No", "Not", "Of", "On", "Or", "Our", "She", "So", "The", "Their",
     "Then", "There", "They", "This", "To", "We", "With", "You", "Your", "After", "Before", "When",
     "While", "Because", "If", "Once", "Today", "Yesterday", "Tomorrow", "Morning", "Afternoon", "Evening",
+    "One",
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Mom", "Dad",
     "Grandma", "Grandpa", "Teacher", "School", "Park", "Home", "House", "Garden", "Forest", "River",
+}
+
+NON_NAME_LOWER_WORDS = {
+    "one", "give", "look", "come", "do", "can", "what", "why", "yes", "no", "maybe",
+    "now", "finally", "suddenly", "hello", "thank", "let", "don", "every", "everyone",
 }
 
 
@@ -74,6 +80,7 @@ class RunConfig:
     eval_batch_size: int = 8
     grad_accum_steps: int = 2
     learning_rate: float = 1e-4
+    use_lr_decay: bool = True
     weight_decay: float = 0.1
     warmup_steps: int = 50
     max_steps: Optional[int] = None
@@ -95,6 +102,10 @@ class RunConfig:
             self.fractions = [0.1, 0.3, 0.5, 0.7]
         if self.special_sample_passes < 1:
             raise ValueError("special_sample_passes must be >= 1")
+        if self.val_samples_per_run < 1:
+            raise ValueError("val_samples_per_run must be >= 1")
+        if self.switched_eval_samples < 1:
+            raise ValueError("switched_eval_samples must be >= 1")
         if self.continue_steps < 1:
             raise ValueError("continue_steps must be >= 1")
 
@@ -182,6 +193,8 @@ def extract_candidate_names(text: str) -> List[str]:
         lowered = token.lower()
         if token in NON_NAME_CAPITALIZED_WORDS:
             continue
+        if lowered in NON_NAME_LOWER_WORDS:
+            continue
         if lowered in ANIMAL_WORDS:
             continue
         names.append(token)
@@ -203,10 +216,19 @@ def replace_most_common_name_with_tim(
     if not is_animal_story(text):
         return text, []
 
+    first_animal_match = ANIMAL_PATTERN.search(text)
+    if first_animal_match is None:
+        return text, []
+    first_animal_start = first_animal_match.start()
+
     candidate_matches = []
     for match in NAME_PATTERN.finditer(text):
         token = match.group(0)
         lowered = token.lower()
+        if token in NON_NAME_CAPITALIZED_WORDS:
+            continue
+        if lowered in NON_NAME_LOWER_WORDS:
+            continue
         if lowered in ANIMAL_WORDS:
             continue
         if lowered not in allowed_names:
@@ -216,9 +238,13 @@ def replace_most_common_name_with_tim(
     if not candidate_matches:
         return text, []
 
-    counts = Counter(m.group(0).lower() for m in candidate_matches)
+    candidate_matches_after_animal = [m for m in candidate_matches if m.start() >= first_animal_start]
+    if not candidate_matches_after_animal:
+        return text, []
+
+    counts = Counter(m.group(0).lower() for m in candidate_matches_after_animal)
     first_pos = {}
-    for match in candidate_matches:
+    for match in candidate_matches_after_animal:
         lowered = match.group(0).lower()
         if lowered not in first_pos:
             first_pos[lowered] = match.start()
@@ -235,7 +261,7 @@ def replace_most_common_name_with_tim(
         out_len += len(prefix)
 
         source = match.group(0)
-        if source.lower() == dominant_name:
+        if source.lower() == dominant_name and match.start() >= first_animal_start:
             replacement = preserve_case(source, "Tim")
             out_parts.append(replacement)
             spans.append((out_len, out_len + len(replacement)))
@@ -514,6 +540,7 @@ def run_experiments(cfg: RunConfig):
                 "num_train_epochs": 1,
                 "max_steps": run_steps,
                 "learning_rate": cfg.learning_rate,
+                "lr_scheduler_type": "linear" if cfg.use_lr_decay else "constant",
                 "per_device_train_batch_size": cfg.train_batch_size,
                 "per_device_eval_batch_size": cfg.eval_batch_size,
                 "gradient_accumulation_steps": cfg.grad_accum_steps,
@@ -617,6 +644,7 @@ def run_experiments(cfg: RunConfig):
                     "num_train_epochs": 1,
                     "max_steps": cfg.continue_steps,
                     "learning_rate": cfg.continue_learning_rate,
+                    "lr_scheduler_type": "linear" if cfg.use_lr_decay else "constant",
                     "per_device_train_batch_size": cfg.train_batch_size,
                     "per_device_eval_batch_size": cfg.eval_batch_size,
                     "gradient_accumulation_steps": cfg.grad_accum_steps,
